@@ -77,7 +77,6 @@ export function Dashboard() {
     updateProject,
     resetConfig,
     saveToCodeMemory,
-    refreshFromServer,
     setIsDashboardRoute,
     isAuthenticated,
     login,
@@ -292,9 +291,8 @@ export function Dashboard() {
     setSaveStatusText('Saving...');
     const ok = await saveToCodeMemory();
     if (ok) {
-      setSaveStatusText('✓ Saved Globally (All Sessions/Devices)!');
-      // Refresh from server to ensure sync
-      await refreshFromServer();
+      setSaveStatusText('✓ Saved to Local Storage (Vercel Production)');
+      // Note: On Vercel, saves to localStorage only (no database configured yet)
     } else {
       setSaveStatusText('✗ Save Failed');
     }

@@ -385,7 +385,6 @@ interface CustomizationContextType {
   updateProject: (id: string, updates: Partial<ProjectItem>) => void;
   resetConfig: () => void;
   saveToCodeMemory: () => Promise<boolean>;
-  refreshFromServer: () => Promise<void>;
   isDashboardRoute: boolean;
   setIsDashboardRoute: (val: boolean) => void;
   isAuthenticated: boolean;
@@ -394,51 +393,99 @@ interface CustomizationContextType {
 }
 
 const CustomizationContext = createContext<CustomizationContextType | undefined>(undefined);
+const STORAGE_KEY = 'eric_zyo_customization_v10';
+
+// Detect if running on Vercel or production
+const isProduction = import.meta.env.PROD;
 
 export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<SiteConfig>(() => {
     try {
-      // ONLY use server-side savedConfig.json - no localStorage
-      const initial = { ...defaultConfig, ...(savedConfigData as any) };
+      if (isProduction) {
+        // On production (Vercel), use localStorage as fallback since file system is read-only
+        const savedLocal = localStorage.getItem(STORAGE_KEY);
+        const parsedLocal = savedLocal ? JSON.parse(savedLocal) : null;
+        const initial = { ...defaultConfig, ...(parsedLocal || {}), ...(savedConfigData as any) };
 
-      const customAdded = (initial.badges || []).filter(
-        (b: any) => !defaultBadges.some((db) => db.id === b.id)
-      );
+        const customAdded = (initial.badges || []).filter(
+          (b: any) => !defaultBadges.some((db) => db.id === b.id)
+        );
 
-      const cleanBadges = [
-        ...defaultBadges.map((b) => {
-          const found = initial.badges?.find((pb: any) => pb.id === b.id);
-          return found ? { ...b, enabled: found.enabled } : b;
-        }),
-        ...customAdded,
-      ];
+        const cleanBadges = [
+          ...defaultBadges.map((b) => {
+            const found = initial.badges?.find((pb: any) => pb.id === b.id);
+            return found ? { ...b, enabled: found.enabled } : b;
+          }),
+          ...customAdded,
+        ];
 
-      // Sanitize expired blob URLs
-      if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
-        initial.bannerUrl = '/back.png';
+        if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
+          initial.bannerUrl = '/back.png';
+        }
+        if (!initial.bannerUrl) {
+          initial.bannerUrl = '/back.png';
+        }
+        if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
+          initial.avatarUrl = '/pfp.jpg';
+        }
+
+        const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
+          ? initial.logoButtons
+          : defaultLogoButtons;
+
+        const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
+          ? initial.cryptoButtons
+          : defaultCryptoButtons;
+
+        return {
+          ...defaultConfig,
+          ...initial,
+          badges: cleanBadges,
+          logoButtons: cleanLogos,
+          cryptoButtons: cleanCrypto,
+        };
+      } else {
+        // On dev, ONLY use server-side savedConfig.json - no localStorage
+        const initial = { ...defaultConfig, ...(savedConfigData as any) };
+
+        const customAdded = (initial.badges || []).filter(
+          (b: any) => !defaultBadges.some((db) => db.id === b.id)
+        );
+
+        const cleanBadges = [
+          ...defaultBadges.map((b) => {
+            const found = initial.badges?.find((pb: any) => pb.id === b.id);
+            return found ? { ...b, enabled: found.enabled } : b;
+          }),
+          ...customAdded,
+        ];
+
+        if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
+          initial.bannerUrl = '/back.png';
+        }
+        if (!initial.bannerUrl) {
+          initial.bannerUrl = '/back.png';
+        }
+        if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
+          initial.avatarUrl = '/pfp.jpg';
+        }
+
+        const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
+          ? initial.logoButtons
+          : defaultLogoButtons;
+
+        const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
+          ? initial.cryptoButtons
+          : defaultCryptoButtons;
+
+        return {
+          ...defaultConfig,
+          ...initial,
+          badges: cleanBadges,
+          logoButtons: cleanLogos,
+          cryptoButtons: cleanCrypto,
+        };
       }
-      if (!initial.bannerUrl) {
-        initial.bannerUrl = '/back.png';
-      }
-      if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
-        initial.avatarUrl = '/pfp.jpg';
-      }
-
-      const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
-        ? initial.logoButtons
-        : defaultLogoButtons;
-
-      const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
-        ? initial.cryptoButtons
-        : defaultCryptoButtons;
-
-      return {
-        ...defaultConfig,
-        ...initial,
-        badges: cleanBadges,
-        logoButtons: cleanLogos,
-        cryptoButtons: cleanCrypto,
-      };
     } catch {
       return defaultConfig;
     }
@@ -477,8 +524,10 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
-  // Auto-refresh from server on mount and when returning to main page
+  // Auto-refresh from server on mount (only in dev)
   useEffect(() => {
+    if (isProduction) return; // Skip server fetch on production
+
     const loadFromServer = async () => {
       try {
         const res = await fetch('/api/get-config');
@@ -532,19 +581,46 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
     loadFromServer();
   }, []);
 
+  // Sync to localStorage on change (only in production)
+  useEffect(() => {
+    if (!isProduction) return; // Only in production (Vercel)
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    } catch {
+      // ignore
+    }
+  }, [config]);
+
   const updateConfig = (updates: Partial<SiteConfig>) => {
     setConfig((prev) => ({ ...prev, ...updates }));
   };
 
   const saveToCodeMemory = async (): Promise<boolean> => {
     try {
-      // ONLY save to server-side JSON for all sessions/devices
-      const res = await fetch('/api/save-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config, null, 2),
-      });
-      return res.ok;
+      if (isProduction) {
+        // On production (Vercel), save to localStorage as fallback
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        // Try to call API anyway (will work once DB is set up)
+        try {
+          const res = await fetch('/api/save-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config, null, 2),
+          });
+          return res.ok;
+        } catch {
+          // API call failed, but localStorage save succeeded
+          return true;
+        }
+      } else {
+        // On dev, save to server-side JSON
+        const res = await fetch('/api/save-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config, null, 2),
+        });
+        return res.ok;
+      }
     } catch {
       return false;
     }
@@ -655,60 +731,12 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
   const resetConfig = () => {
     setConfig(defaultConfig);
     try {
-      fetch('/api/save-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(defaultConfig, null, 2),
-      }).catch(() => {});
-    } catch {
-      // ignore
-    }
-  };
-
-  const refreshFromServer = async () => {
-    try {
-      const res = await fetch('/api/get-config');
-      if (res.ok) {
-        const serverConfig = await res.json();
-        const initial = { ...defaultConfig, ...serverConfig };
-
-        const customAdded = (initial.badges || []).filter(
-          (b: any) => !defaultBadges.some((db) => db.id === b.id)
-        );
-
-        const cleanBadges = [
-          ...defaultBadges.map((b) => {
-            const found = initial.badges?.find((pb: any) => pb.id === b.id);
-            return found ? { ...b, enabled: found.enabled } : b;
-          }),
-          ...customAdded,
-        ];
-
-        if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
-          initial.bannerUrl = '/back.png';
-        }
-        if (!initial.bannerUrl) {
-          initial.bannerUrl = '/back.png';
-        }
-        if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
-          initial.avatarUrl = '/pfp.jpg';
-        }
-
-        const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
-          ? initial.logoButtons
-          : defaultLogoButtons;
-
-        const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
-          ? initial.cryptoButtons
-          : defaultCryptoButtons;
-
-        setConfig({
-          ...defaultConfig,
-          ...initial,
-          badges: cleanBadges,
-          logoButtons: cleanLogos,
-          cryptoButtons: cleanCrypto,
-        });
+      if (!isProduction) {
+        fetch('/api/save-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(defaultConfig, null, 2),
+        }).catch(() => {});
       }
     } catch {
       // ignore
@@ -755,7 +783,6 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
         updateProject,
         resetConfig,
         saveToCodeMemory,
-        refreshFromServer,
         isDashboardRoute,
         setIsDashboardRoute,
         isAuthenticated,

@@ -35,6 +35,30 @@ function saveConfigPlugin() {
           res.end();
         }
       });
+
+      server.middlewares.use('/api/get-config', (req: any, res: any) => {
+        if (req.method === 'GET') {
+          try {
+            const filePath = path.resolve(process.cwd(), 'src/data/savedConfig.json');
+            if (fs.existsSync(filePath)) {
+              const data = fs.readFileSync(filePath, 'utf8');
+              res.setHeader('Content-Type', 'application/json');
+              res.end(data);
+            } else {
+              res.statusCode = 404;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'Config file not found' }));
+            }
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: err.message }));
+          }
+        } else {
+          res.statusCode = 404;
+          res.end();
+        }
+      });
     },
   };
 }

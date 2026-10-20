@@ -385,6 +385,7 @@ interface CustomizationContextType {
   updateProject: (id: string, updates: Partial<ProjectItem>) => void;
   resetConfig: () => void;
   saveToCodeMemory: () => Promise<boolean>;
+  refreshFromServer: () => Promise<void>;
   isDashboardRoute: boolean;
   setIsDashboardRoute: (val: boolean) => void;
   isAuthenticated: boolean;
@@ -393,15 +394,12 @@ interface CustomizationContextType {
 }
 
 const CustomizationContext = createContext<CustomizationContextType | undefined>(undefined);
-const STORAGE_KEY = 'eric_zyo_customization_v10';
 
 export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<SiteConfig>(() => {
     try {
-      const savedLocal = localStorage.getItem(STORAGE_KEY);
-      const parsedLocal = savedLocal ? JSON.parse(savedLocal) : null;
-      // Prioritize server-side savedConfig.json over localStorage
-      const initial = { ...defaultConfig, ...(parsedLocal || {}), ...(savedConfigData as any) };
+      // ONLY use server-side savedConfig.json - no localStorage
+      const initial = { ...defaultConfig, ...(savedConfigData as any) };
 
       const customAdded = (initial.badges || []).filter(
         (b: any) => !defaultBadges.some((db) => db.id === b.id)
@@ -479,19 +477,68 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
+  // Auto-refresh from server on mount and when returning to main page
+  useEffect(() => {
+    const loadFromServer = async () => {
+      try {
+        const res = await fetch('/api/get-config');
+        if (res.ok) {
+          const serverConfig = await res.json();
+          const initial = { ...defaultConfig, ...serverConfig };
+
+          const customAdded = (initial.badges || []).filter(
+            (b: any) => !defaultBadges.some((db) => db.id === b.id)
+          );
+
+          const cleanBadges = [
+            ...defaultBadges.map((b) => {
+              const found = initial.badges?.find((pb: any) => pb.id === b.id);
+              return found ? { ...b, enabled: found.enabled } : b;
+            }),
+            ...customAdded,
+          ];
+
+          if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
+            initial.bannerUrl = '/back.png';
+          }
+          if (!initial.bannerUrl) {
+            initial.bannerUrl = '/back.png';
+          }
+          if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
+            initial.avatarUrl = '/pfp.jpg';
+          }
+
+          const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
+            ? initial.logoButtons
+            : defaultLogoButtons;
+
+          const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
+            ? initial.cryptoButtons
+            : defaultCryptoButtons;
+
+          setConfig({
+            ...defaultConfig,
+            ...initial,
+            badges: cleanBadges,
+            logoButtons: cleanLogos,
+            cryptoButtons: cleanCrypto,
+          });
+        }
+      } catch {
+        // ignore - use default
+      }
+    };
+
+    loadFromServer();
+  }, []);
+
   const updateConfig = (updates: Partial<SiteConfig>) => {
-    setConfig((prev) => {
-      const next = { ...prev, ...updates };
-      // Don't save to localStorage here - only when explicitly saved via saveToCodeMemory
-      return next;
-    });
+    setConfig((prev) => ({ ...prev, ...updates }));
   };
 
   const saveToCodeMemory = async (): Promise<boolean> => {
     try {
-      // Save to localStorage for current session
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-      // Save to server-side JSON for all sessions/devices
+      // ONLY save to server-side JSON for all sessions/devices
       const res = await fetch('/api/save-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -504,59 +551,45 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const toggleBadge = (badgeId: string) => {
-    setConfig((prev) => {
-      const updated = prev.badges.map((b) => (b.id === badgeId ? { ...b, enabled: !b.enabled } : b));
-      const next = { ...prev, badges: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      badges: prev.badges.map((b) => (b.id === badgeId ? { ...b, enabled: !b.enabled } : b)),
+    }));
   };
 
   const addBadge = (item: Omit<CustomBadgeItem, 'id'>) => {
-    setConfig((prev) => {
-      const newBadge: CustomBadgeItem = {
-        id: `badge_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        ...item,
-      };
-      const updated = [...prev.badges, newBadge];
-      const next = { ...prev, badges: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      badges: [...prev.badges, { id: `badge_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`, ...item }],
+    }));
   };
 
   const removeBadge = (badgeId: string) => {
-    setConfig((prev) => {
-      const updated = prev.badges.filter((b) => b.id !== badgeId);
-      const next = { ...prev, badges: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      badges: prev.badges.filter((b) => b.id !== badgeId),
+    }));
   };
 
   const addLogoButton = (item: Omit<LogoButtonItem, 'id'>) => {
-    setConfig((prev) => {
-      const newButton: LogoButtonItem = {
-        id: `btn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        ...item,
-      };
-      const updated = [...prev.logoButtons, newButton];
-      const next = { ...prev, logoButtons: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      logoButtons: [...prev.logoButtons, { id: `btn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`, ...item }],
+    }));
   };
 
   const removeLogoButton = (logoId: string) => {
-    setConfig((prev) => {
-      const updated = prev.logoButtons.filter((l) => l.id !== logoId);
-      const next = { ...prev, logoButtons: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      logoButtons: prev.logoButtons.filter((l) => l.id !== logoId),
+    }));
   };
 
   const updateLogoButton = (logoId: string, updates: Partial<LogoButtonItem>) => {
-    setConfig((prev) => {
-      const updated = prev.logoButtons.map((l) => (l.id === logoId ? { ...l, ...updates } : l));
-      const next = { ...prev, logoButtons: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      logoButtons: prev.logoButtons.map((l) => (l.id === logoId ? { ...l, ...updates } : l)),
+    }));
   };
 
   const moveLogoButton = (index: number, direction: 'up' | 'down') => {
@@ -566,83 +599,117 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
       const copy = [...prev.logoButtons];
       const [moved] = copy.splice(index, 1);
       copy.splice(targetIndex, 0, moved);
-      const next = { ...prev, logoButtons: copy };
-      return next;
+      return { ...prev, logoButtons: copy };
     });
   };
 
   const addCryptoButton = (item: Omit<CryptoButtonItem, 'id'>) => {
-    setConfig((prev) => {
-      const newItem: CryptoButtonItem = { ...item, id: `crypto_${Date.now()}_${Math.random().toString(36).substring(2, 6)}` };
-      const next = { ...prev, cryptoButtons: [...prev.cryptoButtons, newItem] };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      cryptoButtons: [...prev.cryptoButtons, { ...item, id: `crypto_${Date.now()}_${Math.random().toString(36).substring(2, 6)}` }],
+    }));
   };
 
   const removeCryptoButton = (id: string) => {
-    setConfig((prev) => {
-      const next = { ...prev, cryptoButtons: prev.cryptoButtons.filter((c) => c.id !== id) };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      cryptoButtons: prev.cryptoButtons.filter((c) => c.id !== id),
+    }));
   };
 
   const updateCryptoButton = (id: string, updates: Partial<CryptoButtonItem>) => {
-    setConfig((prev) => {
-      const next = {
-        ...prev,
-        cryptoButtons: prev.cryptoButtons.map((c) => (c.id === id ? { ...c, ...updates } : c)),
-      };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      cryptoButtons: prev.cryptoButtons.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+    }));
   };
 
   const toggleCryptoButton = (id: string) => {
-    setConfig((prev) => {
-      const next = {
-        ...prev,
-        cryptoButtons: prev.cryptoButtons.map((c) => (c.id === id ? { ...c, enabled: !c.enabled } : c)),
-      };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      cryptoButtons: prev.cryptoButtons.map((c) => (c.id === id ? { ...c, enabled: !c.enabled } : c)),
+    }));
   };
 
   const addProject = (item: Omit<ProjectItem, 'id'>) => {
-    setConfig((prev) => {
-      const newProj: ProjectItem = {
-        id: `proj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        ...item,
-      };
-      const updated = [...(prev.projects || []), newProj];
-      const next = { ...prev, projects: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      projects: [...(prev.projects || []), { id: `proj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`, ...item }],
+    }));
   };
 
   const removeProject = (projId: string) => {
-    setConfig((prev) => {
-      const updated = (prev.projects || []).filter((p) => p.id !== projId);
-      const next = { ...prev, projects: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      projects: (prev.projects || []).filter((p) => p.id !== projId),
+    }));
   };
 
   const updateProject = (projId: string, updates: Partial<ProjectItem>) => {
-    setConfig((prev) => {
-      const updated = (prev.projects || []).map((p) => (p.id === projId ? { ...p, ...updates } : p));
-      const next = { ...prev, projects: updated };
-      return next;
-    });
+    setConfig((prev) => ({
+      ...prev,
+      projects: (prev.projects || []).map((p) => (p.id === projId ? { ...p, ...updates } : p)),
+    }));
   };
 
   const resetConfig = () => {
     setConfig(defaultConfig);
     try {
-      localStorage.removeItem(STORAGE_KEY);
       fetch('/api/save-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(defaultConfig, null, 2),
       }).catch(() => {});
+    } catch {
+      // ignore
+    }
+  };
+
+  const refreshFromServer = async () => {
+    try {
+      const res = await fetch('/api/get-config');
+      if (res.ok) {
+        const serverConfig = await res.json();
+        const initial = { ...defaultConfig, ...serverConfig };
+
+        const customAdded = (initial.badges || []).filter(
+          (b: any) => !defaultBadges.some((db) => db.id === b.id)
+        );
+
+        const cleanBadges = [
+          ...defaultBadges.map((b) => {
+            const found = initial.badges?.find((pb: any) => pb.id === b.id);
+            return found ? { ...b, enabled: found.enabled } : b;
+          }),
+          ...customAdded,
+        ];
+
+        if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
+          initial.bannerUrl = '/back.png';
+        }
+        if (!initial.bannerUrl) {
+          initial.bannerUrl = '/back.png';
+        }
+        if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
+          initial.avatarUrl = '/pfp.jpg';
+        }
+
+        const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
+          ? initial.logoButtons
+          : defaultLogoButtons;
+
+        const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
+          ? initial.cryptoButtons
+          : defaultCryptoButtons;
+
+        setConfig({
+          ...defaultConfig,
+          ...initial,
+          badges: cleanBadges,
+          logoButtons: cleanLogos,
+          cryptoButtons: cleanCrypto,
+        });
+      }
     } catch {
       // ignore
     }
@@ -688,6 +755,7 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
         updateProject,
         resetConfig,
         saveToCodeMemory,
+        refreshFromServer,
         isDashboardRoute,
         setIsDashboardRoute,
         isAuthenticated,

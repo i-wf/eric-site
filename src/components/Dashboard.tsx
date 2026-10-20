@@ -77,6 +77,7 @@ export function Dashboard() {
     updateProject,
     resetConfig,
     saveToCodeMemory,
+    refreshFromServer,
     setIsDashboardRoute,
     isAuthenticated,
     login,
@@ -291,14 +292,16 @@ export function Dashboard() {
     setSaveStatusText('Saving...');
     const ok = await saveToCodeMemory();
     if (ok) {
-      setSaveStatusText('✓ Saved to Code & Storage!');
+      setSaveStatusText('✓ Saved Globally (All Sessions/Devices)!');
+      // Refresh from server to ensure sync
+      await refreshFromServer();
     } else {
-      setSaveStatusText('✓ Saved Locally');
+      setSaveStatusText('✗ Save Failed');
     }
     setTimeout(() => {
       setIsSaved(false);
       setSaveStatusText('Save Changes');
-    }, 2200);
+    }, 3000);
   };
 
   const handleFileUpload = (

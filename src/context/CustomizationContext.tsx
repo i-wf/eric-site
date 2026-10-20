@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import savedConfigData from '../data/savedConfig.json';
+import { supabase } from '../lib/supabase';
 
 export type TemplateStyle = 
   | 'glassmorphism' 
@@ -398,6 +399,47 @@ const STORAGE_KEY = 'eric_zyo_customization_v10';
 // Detect if running on Vercel or production
 const isProduction = import.meta.env.PROD;
 
+// Helper function to process config
+const processConfig = (initial: any): SiteConfig => {
+  const customAdded = (initial.badges || []).filter(
+    (b: any) => !defaultBadges.some((db) => db.id === b.id)
+  );
+
+  const cleanBadges = [
+    ...defaultBadges.map((b) => {
+      const found = initial.badges?.find((pb: any) => pb.id === b.id);
+      return found ? { ...b, enabled: found.enabled } : b;
+    }),
+    ...customAdded,
+  ];
+
+  if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
+    initial.bannerUrl = '/back.png';
+  }
+  if (!initial.bannerUrl) {
+    initial.bannerUrl = '/back.png';
+  }
+  if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
+    initial.avatarUrl = '/pfp.jpg';
+  }
+
+  const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
+    ? initial.logoButtons
+    : defaultLogoButtons;
+
+  const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
+    ? initial.cryptoButtons
+    : defaultCryptoButtons;
+
+  return {
+    ...defaultConfig,
+    ...initial,
+    badges: cleanBadges,
+    logoButtons: cleanLogos,
+    cryptoButtons: cleanCrypto,
+  };
+};
+
 export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<SiteConfig>(() => {
     try {
@@ -406,85 +448,11 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
         const savedLocal = localStorage.getItem(STORAGE_KEY);
         const parsedLocal = savedLocal ? JSON.parse(savedLocal) : null;
         const initial = { ...defaultConfig, ...(parsedLocal || {}), ...(savedConfigData as any) };
-
-        const customAdded = (initial.badges || []).filter(
-          (b: any) => !defaultBadges.some((db) => db.id === b.id)
-        );
-
-        const cleanBadges = [
-          ...defaultBadges.map((b) => {
-            const found = initial.badges?.find((pb: any) => pb.id === b.id);
-            return found ? { ...b, enabled: found.enabled } : b;
-          }),
-          ...customAdded,
-        ];
-
-        if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
-          initial.bannerUrl = '/back.png';
-        }
-        if (!initial.bannerUrl) {
-          initial.bannerUrl = '/back.png';
-        }
-        if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
-          initial.avatarUrl = '/pfp.jpg';
-        }
-
-        const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
-          ? initial.logoButtons
-          : defaultLogoButtons;
-
-        const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
-          ? initial.cryptoButtons
-          : defaultCryptoButtons;
-
-        return {
-          ...defaultConfig,
-          ...initial,
-          badges: cleanBadges,
-          logoButtons: cleanLogos,
-          cryptoButtons: cleanCrypto,
-        };
+        return processConfig(initial);
       } else {
         // On dev, ONLY use server-side savedConfig.json - no localStorage
         const initial = { ...defaultConfig, ...(savedConfigData as any) };
-
-        const customAdded = (initial.badges || []).filter(
-          (b: any) => !defaultBadges.some((db) => db.id === b.id)
-        );
-
-        const cleanBadges = [
-          ...defaultBadges.map((b) => {
-            const found = initial.badges?.find((pb: any) => pb.id === b.id);
-            return found ? { ...b, enabled: found.enabled } : b;
-          }),
-          ...customAdded,
-        ];
-
-        if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
-          initial.bannerUrl = '/back.png';
-        }
-        if (!initial.bannerUrl) {
-          initial.bannerUrl = '/back.png';
-        }
-        if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
-          initial.avatarUrl = '/pfp.jpg';
-        }
-
-        const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
-          ? initial.logoButtons
-          : defaultLogoButtons;
-
-        const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
-          ? initial.cryptoButtons
-          : defaultCryptoButtons;
-
-        return {
-          ...defaultConfig,
-          ...initial,
-          badges: cleanBadges,
-          logoButtons: cleanLogos,
-          cryptoButtons: cleanCrypto,
-        };
+        return processConfig(initial);
       }
     } catch {
       return defaultConfig;
@@ -524,64 +492,45 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
-  // Auto-refresh from server on mount (only in dev)
+  // Auto-load from database on mount
   useEffect(() => {
-    if (isProduction) return; // Skip server fetch on production
-
-    const loadFromServer = async () => {
+    const loadConfig = async () => {
       try {
-        const res = await fetch('/api/get-config');
-        if (res.ok) {
-          const serverConfig = await res.json();
-          const initial = { ...defaultConfig, ...serverConfig };
+        if (isProduction) {
+          // On production, load from Supabase
+          const { data, error } = await supabase
+            .from('site_config')
+            .select('config')
+            .eq('id', 1)
+            .single();
 
-          const customAdded = (initial.badges || []).filter(
-            (b: any) => !defaultBadges.some((db) => db.id === b.id)
-          );
-
-          const cleanBadges = [
-            ...defaultBadges.map((b) => {
-              const found = initial.badges?.find((pb: any) => pb.id === b.id);
-              return found ? { ...b, enabled: found.enabled } : b;
-            }),
-            ...customAdded,
-          ];
-
-          if (initial.bannerUrl && initial.bannerUrl.startsWith('blob:')) {
-            initial.bannerUrl = '/back.png';
-          }
-          if (!initial.bannerUrl) {
-            initial.bannerUrl = '/back.png';
-          }
-          if (initial.avatarUrl && initial.avatarUrl.startsWith('blob:')) {
-            initial.avatarUrl = '/pfp.jpg';
+          if (error) {
+            console.error('Supabase load error:', error);
+            return;
           }
 
-          const cleanLogos = (initial.logoButtons && initial.logoButtons.length > 0)
-            ? initial.logoButtons
-            : defaultLogoButtons;
-
-          const cleanCrypto = (initial.cryptoButtons && initial.cryptoButtons.length > 0)
-            ? initial.cryptoButtons
-            : defaultCryptoButtons;
-
-          setConfig({
-            ...defaultConfig,
-            ...initial,
-            badges: cleanBadges,
-            logoButtons: cleanLogos,
-            cryptoButtons: cleanCrypto,
-          });
+          if (data?.config) {
+            const initial = { ...defaultConfig, ...data.config };
+            setConfig(processConfig(initial));
+          }
+        } else {
+          // On dev, load from server API
+          const res = await fetch('/api/get-config');
+          if (res.ok) {
+            const serverConfig = await res.json();
+            const initial = { ...defaultConfig, ...serverConfig };
+            setConfig(processConfig(initial));
+          }
         }
       } catch {
         // ignore - use default
       }
     };
 
-    loadFromServer();
+    loadConfig();
   }, []);
 
-  // Sync to localStorage on change (only in production)
+  // Sync to localStorage on change (only in production as backup)
   useEffect(() => {
     if (!isProduction) return; // Only in production (Vercel)
     try {
@@ -598,20 +547,22 @@ export const CustomizationProvider: React.FC<{ children: React.ReactNode }> = ({
   const saveToCodeMemory = async (): Promise<boolean> => {
     try {
       if (isProduction) {
-        // On production (Vercel), save to localStorage as fallback
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-        // Try to call API anyway (will work once DB is set up)
-        try {
-          const res = await fetch('/api/save-config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config, null, 2),
-          });
-          return res.ok;
-        } catch {
-          // API call failed, but localStorage save succeeded
-          return true;
+        // On production (Vercel), save to Supabase directly
+        const { error } = await supabase
+          .from('site_config')
+          .update({ config })
+          .eq('id', 1);
+
+        if (error) {
+          console.error('Supabase save error:', error);
+          // Fallback to localStorage
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+          return false;
         }
+
+        // Also save to localStorage as backup
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        return true;
       } else {
         // On dev, save to server-side JSON
         const res = await fetch('/api/save-config', {

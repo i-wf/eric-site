@@ -291,8 +291,7 @@ export function Dashboard() {
     setSaveStatusText('Saving...');
     const ok = await saveToCodeMemory();
     if (ok) {
-      setSaveStatusText('✓ Saved to Local Storage (Vercel Production)');
-      // Note: On Vercel, saves to localStorage only (no database configured yet)
+      setSaveStatusText('✓ Saved Globally (Supabase)');
     } else {
       setSaveStatusText('✗ Save Failed');
     }

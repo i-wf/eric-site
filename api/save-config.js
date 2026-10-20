@@ -1,3 +1,10 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(404).end();
@@ -6,23 +13,24 @@ export default async function handler(req, res) {
   try {
     const body = req.body;
 
-    // For Vercel deployment, we need to use a database or KV store
-    // since the file system is read-only in production
+    // Update the config in Supabase
+    const { data, error } = await supabase
+      .from('site_config')
+      .update({ config: body })
+      .eq('id', 1)
+      .select();
 
-    // Option 1: Use Vercel KV (Redis)
-    // await kv.set('site-config', JSON.stringify(body));
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
 
-    // Option 2: Use Vercel Postgres
-    // await sql`INSERT INTO config (data) VALUES (${JSON.stringify(body)})`;
-
-    // Option 3: Use external database (Supabase, MongoDB, etc.)
-
-    // For now, just return success (no persistence on Vercel without DB)
     return res.status(200).json({
       success: true,
-      message: 'Config received (Note: Add database for actual persistence on Vercel)'
+      message: 'Config saved to Supabase'
     });
   } catch (error) {
+    console.error('Save error:', error);
     return res.status(500).json({ error: error.message });
   }
 }

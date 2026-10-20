@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .agents/
+
+# Environment variables
+.env
+.env.local
